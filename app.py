@@ -5,6 +5,7 @@ from pyvis.network import Network
 import random
 import tempfile
 import heapq
+import time
 
 st.set_page_config(layout="wide", page_title="Graph Algorithm Visualizer", page_icon="🕸️")
 
@@ -15,6 +16,12 @@ if 'heuristics' not in st.session_state:
     st.session_state.heuristics = {}
 if 'history' not in st.session_state:
     st.session_state.history = []
+if 'step' not in st.session_state:
+    st.session_state.step = 0
+if 'playing' not in st.session_state:
+    st.session_state.playing = False
+if 'speed' not in st.session_state:
+    st.session_state.speed = 1.0
 
 def add_edge(u, v, weight):
     u = u.strip()
@@ -38,7 +45,48 @@ def generate_random_graph(num_nodes, probability):
         H.add_edge(str(u), str(v), weight=random.randint(1, 20))
     st.session_state.G = H
     st.session_state.heuristics = {str(n): random.randint(1, 10) for n in H.nodes()}
-    st.session_state.history = [] # reset history
+    st.session_state.history = [] 
+    st.session_state.playing = False
+    st.session_state.step = 0
+
+# --- Tracking Tables ---
+def get_bfs_table(G, queue, visited_set, parent):
+    table = []
+    for n in G.nodes():
+        if n in queue: status = "Đang chờ (Queue)"
+        elif n in visited_set: status = "Đã duyệt"
+        else: status = "Chưa duyệt"
+        table.append({"Node": str(n), "Trạng thái": status, "Node cha": str(parent.get(n, "-"))})
+    return table
+
+def get_dijkstra_table(G, distances, visited, parent):
+    table = []
+    for n in G.nodes():
+        dist = distances[n] if distances[n] != float('inf') else "∞"
+        if n in visited: status = "Đã duyệt xong"
+        elif distances[n] != float('inf'): status = "Đang trong Hàng đợi ưu tiên"
+        else: status = "Chưa khám phá"
+        table.append({"Node": str(n), "Khoảng cách ngắn nhất": str(dist), "Trạng thái": status, "Node cha": str(parent.get(n, "-"))})
+    return table
+
+def get_astar_table(G, distances, heuristics, visited, parent):
+    table = []
+    for n in G.nodes():
+        g_val = distances[n] if distances[n] != float('inf') else "∞"
+        h_val = heuristics.get(n, 0)
+        f_val = (distances[n] + h_val) if distances[n] != float('inf') else "∞"
+        if n in visited: status = "Đã duyệt xong"
+        elif distances[n] != float('inf'): status = "Trong Hàng đợi ưu tiên"
+        else: status = "Chưa khám phá"
+        table.append({"Node": str(n), "g(n) - Chi phí": str(g_val), "h(n) - Ước lượng": str(h_val), "f(n) = g+h": str(f_val), "Trạng thái": status, "Node cha": str(parent.get(n, "-"))})
+    return table
+
+def get_kruskal_table(edges, edge_status):
+    table = []
+    for u, v, d in edges:
+        weight = d.get('weight', 1)
+        table.append({"Cạnh": f"{u} - {v}", "Trọng số": str(weight), "Trạng thái": edge_status.get((u, v), "Đang chờ")})
+    return table
 
 # --- Algorithms ---
 def bfs(G, start, target=None):
@@ -60,7 +108,8 @@ def bfs(G, start, target=None):
             "highlight_nodes": list(visited),
             "highlight_edges": list(path_edges),
             "current_node": node,
-            "log": f"Visiting node {node}"
+            "log": f"Đang duyệt node {node}...",
+            "table": get_bfs_table(G, queue, visited_set, parent)
         })
             
         if node == target:
@@ -68,7 +117,8 @@ def bfs(G, start, target=None):
                 "highlight_nodes": list(visited),
                 "highlight_edges": list(path_edges),
                 "current_node": node,
-                "log": f"Target {target} found!"
+                "log": f"Đã tìm thấy đích đến: {target}!",
+                "table": get_bfs_table(G, queue, visited_set, parent)
             })
             break
             
@@ -89,6 +139,15 @@ def dfs(G, start, target=None):
     parent = {}
     history = []
     
+    def get_dfs_table():
+        table = []
+        for n in G.nodes():
+            if n in stack: status = "Đang trong Ngăn xếp (Stack)"
+            elif n in visited_set: status = "Đã duyệt"
+            else: status = "Chưa duyệt"
+            table.append({"Node": str(n), "Trạng thái": status, "Node cha": str(parent.get(n, "-"))})
+        return table
+        
     while stack:
         node = stack.pop()
         if node not in visited_set:
@@ -102,7 +161,8 @@ def dfs(G, start, target=None):
                 "highlight_nodes": list(visited),
                 "highlight_edges": list(path_edges),
                 "current_node": node,
-                "log": f"Visiting node {node}"
+                "log": f"Đang duyệt node {node}...",
+                "table": get_dfs_table()
             })
                 
             if node == target:
@@ -110,7 +170,8 @@ def dfs(G, start, target=None):
                     "highlight_nodes": list(visited),
                     "highlight_edges": list(path_edges),
                     "current_node": node,
-                    "log": f"Target {target} found!"
+                    "log": f"Đã tìm thấy đích đến: {target}!",
+                    "table": get_dfs_table()
                 })
                 break
                 
@@ -150,7 +211,8 @@ def dijkstra(G, start, target):
             "highlight_nodes": list(visited_list),
             "highlight_edges": list(highlight_edges),
             "current_node": node,
-            "log": f"Visiting {node} (Cost from start: {dist})"
+            "log": f"Duyệt node {node} (Khoảng cách tích lũy từ điểm xuất phát: {dist})",
+            "table": get_dijkstra_table(G, distances, visited, parent)
         })
         
         if node == target:
@@ -166,7 +228,8 @@ def dijkstra(G, start, target):
                 "highlight_nodes": path,
                 "highlight_edges": path_e,
                 "current_node": target,
-                "log": f"Shortest path found! Total Cost: {dist}\n\nPath: {' -> '.join(path)}"
+                "log": f"Tìm thấy đường đi ngắn nhất! Tổng chi phí: {dist}\n\nĐường đi: {' -> '.join(path)}",
+                "table": get_dijkstra_table(G, distances, visited, parent)
             })
             break
             
@@ -186,7 +249,7 @@ def astar(G, start, target, heuristics):
     
     distances = {n: float('inf') for n in G.nodes()}
     distances[start] = 0
-    pq = [(0 + heuristics.get(start, 0), 0, start)] # (f, g, node)
+    pq = [(0 + heuristics.get(start, 0), 0, start)]
     visited = set()
     parent = {}
     
@@ -210,7 +273,8 @@ def astar(G, start, target, heuristics):
             "highlight_nodes": list(visited_list),
             "highlight_edges": list(highlight_edges),
             "current_node": node,
-            "log": f"Visiting {node}\n\nCost so far (g): {g}\nHeuristic to target (h): {heuristics.get(node,0)}\nTotal estimated (f=g+h): {f}"
+            "log": f"Đang duyệt {node}\n- Chi phí từ đầu (g): {g}\n- Heuristic tới đích (h): {heuristics.get(node,0)}\n- Tổng ước tính (f=g+h): {f}",
+            "table": get_astar_table(G, distances, heuristics, visited, parent)
         })
         
         if node == target:
@@ -226,7 +290,8 @@ def astar(G, start, target, heuristics):
                 "highlight_nodes": path,
                 "highlight_edges": path_e,
                 "current_node": target,
-                "log": f"A* Path found! Total Cost: {g}\n\nPath: {' -> '.join(path)}"
+                "log": f"A* đã tìm thấy đường đi! Tổng chi phí: {g}\n\nĐường đi: {' -> '.join(path)}",
+                "table": get_astar_table(G, distances, heuristics, visited, parent)
             })
             break
             
@@ -267,21 +332,26 @@ def mst_kruskal(G):
     mst_edges = []
     mst_nodes = set()
     total_cost = 0
+    edge_status = {(u, v): "Đang chờ" for u,v,d in edges}
     
     history.append({
         "highlight_nodes": [],
         "highlight_edges": [],
         "current_node": None,
-        "log": "Starting Kruskal's MST. Sorted edges by weight."
+        "log": "Bắt đầu thuật toán Kruskal (Đã sắp xếp các cạnh tăng dần theo trọng số).",
+        "table": get_kruskal_table(edges, edge_status)
     })
     
     for u, v, d in edges:
         weight = d.get('weight', 1)
+        edge_status[(u, v)] = "Đang kiểm tra..."
+        
         history.append({
             "highlight_nodes": list(mst_nodes) + [u, v],
             "highlight_edges": list(mst_edges) + [(u, v)],
             "current_node": None,
-            "log": f"Inspecting edge {u}-{v} (Weight: {weight})"
+            "log": f"Đang xét cạnh: {u}-{v} (Trọng số: {weight})",
+            "table": get_kruskal_table(edges, edge_status)
         })
         
         if union(u, v):
@@ -289,77 +359,97 @@ def mst_kruskal(G):
             mst_nodes.add(u)
             mst_nodes.add(v)
             total_cost += weight
+            edge_status[(u, v)] = "Đã thêm vào MST"
+            
             history.append({
                 "highlight_nodes": list(mst_nodes),
                 "highlight_edges": list(mst_edges),
                 "current_node": None,
-                "log": f"Added edge {u}-{v} to MST. Total cost so far: {total_cost}"
+                "log": f"Chấp nhận cạnh {u}-{v} vào MST. Tổng trọng số hiện tại: {total_cost}",
+                "table": get_kruskal_table(edges, edge_status)
             })
         else:
+            edge_status[(u, v)] = "Bị loại (Tạo thành chu trình)"
             history.append({
                 "highlight_nodes": list(mst_nodes),
                 "highlight_edges": list(mst_edges),
                 "current_node": None,
-                "log": f"Edge {u}-{v} creates a cycle. Discarding."
+                "log": f"Cạnh {u}-{v} tạo thành chu trình kín. Bị loại bỏ!",
+                "table": get_kruskal_table(edges, edge_status)
             })
             
     history.append({
         "highlight_nodes": list(mst_nodes),
         "highlight_edges": list(mst_edges),
         "current_node": None,
-        "log": f"MST Complete! Total Cost: {total_cost}"
+        "log": f"Hoàn thành Cây khung nhỏ nhất (MST)! Tổng trọng số: {total_cost}",
+        "table": get_kruskal_table(edges, edge_status)
     })
             
     return history
 
 # --- UI ---
-st.title("Graph Traversal & Pathfinding Visualizer 🕸️")
+st.title("Trình Mô Phỏng Thuật Toán Đồ Thị 🕸️")
 
 with st.sidebar:
-    st.header("1. Graph Construction")
+    st.header("1. Xây dựng đồ thị")
     
-    st.subheader("Add Edge")
+    st.subheader("Thêm Cạnh (Edge)")
     col1, col2 = st.columns(2)
     with col1:
         u_node = st.text_input("Node A")
     with col2:
         v_node = st.text_input("Node B")
-    weight = st.number_input("Weight", value=1.0, min_value=0.0)
-    if st.button("Add Edge"):
+    weight = st.number_input("Trọng số (Weight)", value=1.0, min_value=0.0)
+    if st.button("Thêm Cạnh"):
         add_edge(u_node, v_node, weight)
         st.session_state.history = []
-        st.success(f"Added edge: {u_node} - {v_node} (Weight: {weight})")
+        st.session_state.playing = False
+        st.session_state.step = 0
+        st.success(f"Đã thêm: {u_node} - {v_node} (Trọng số: {weight})")
         
-    st.subheader("Set Heuristic (for A*)")
+    st.subheader("Đặt giá trị Heuristic (cho A*)")
     nodes = list(st.session_state.G.nodes())
-    h_node = st.selectbox("Select Node", options=[""] + nodes if nodes else [""])
-    h_val = st.number_input("Heuristic Value", value=0.0)
-    if st.button("Set Heuristic"):
+    h_node = st.selectbox("Chọn Node", options=[""] + nodes if nodes else [""])
+    h_val = st.number_input("Giá trị Heuristic", value=0.0)
+    if st.button("Lưu Heuristic"):
         if h_node:
             set_heuristic(h_node, h_val)
             st.session_state.history = []
-            st.success(f"Set h({h_node}) = {h_val}")
+            st.success(f"Đã lưu h({h_node}) = {h_val}")
             
-    st.subheader("Quick Start")
-    rand_nodes = st.slider("Number of Nodes", 5, 20, 10)
-    rand_prob = st.slider("Edge Probability", 0.1, 1.0, 0.3)
-    if st.button("Generate Random Graph"):
+    st.subheader("Tạo đồ thị ngẫu nhiên")
+    rand_nodes = st.slider("Số lượng Node", 5, 20, 8)
+    rand_prob = st.slider("Xác suất nối cạnh", 0.1, 1.0, 0.3)
+    if st.button("Khởi tạo ngẫu nhiên"):
         generate_random_graph(rand_nodes, rand_prob)
-        st.success("Generated random graph!")
+        st.success("Đã tạo thành công!")
         
-    if st.button("Clear Graph"):
+    if st.button("Xóa toàn bộ đồ thị", type="primary"):
         st.session_state.G.clear()
         st.session_state.heuristics.clear()
         st.session_state.history = []
-        st.success("Graph cleared!")
+        st.session_state.playing = False
+        st.session_state.step = 0
+        st.success("Đã xóa sạch đồ thị!")
 
-    st.header("2. Algorithm Selection")
-    algo = st.selectbox("Select Algorithm", ["BFS", "DFS", "Dijkstra", "A*", "MST (Kruskal)"])
+    st.header("2. Chọn Thuật toán")
+    algo = st.selectbox("Thuật toán:", ["BFS", "DFS", "Dijkstra", "A*", "MST (Kruskal)"])
     
-    start_node = st.selectbox("Start Node", options=nodes if nodes else [""])
-    target_node = st.selectbox("Target Node", options=nodes if nodes else [""])
+    start_node = st.selectbox("Node xuất phát", options=nodes if nodes else [""])
+    target_node = st.selectbox("Node đích", options=nodes if nodes else [""])
     
-    run_btn = st.button("Run Visualization", type="primary")
+    if st.button("Tiến hành Mô Phỏng 🚀", type="primary"):
+        G = st.session_state.G
+        if G.number_of_nodes() > 0:
+            if algo == "BFS": st.session_state.history = bfs(G, start_node, target_node)
+            elif algo == "DFS": st.session_state.history = dfs(G, start_node, target_node)
+            elif algo == "Dijkstra": st.session_state.history = dijkstra(G, start_node, target_node)
+            elif algo == "A*": st.session_state.history = astar(G, start_node, target_node, st.session_state.heuristics)
+            elif algo == "MST (Kruskal)": st.session_state.history = mst_kruskal(G)
+            
+            st.session_state.step = 0
+            st.session_state.playing = False
 
 # --- Visualization Logic ---
 def create_pyvis_graph(G, highlight_nodes=None, highlight_edges=None, current_node=None):
@@ -371,7 +461,7 @@ def create_pyvis_graph(G, highlight_nodes=None, highlight_edges=None, current_no
     for node in G.nodes():
         if node == current_node:
             color = "#f1c40f" # Yellow for current step
-            size = 25
+            size = 35
         elif node in highlight_nodes:
             if node == start_node and algo != "MST (Kruskal)":
                 color = "#2ecc71" # Green
@@ -379,85 +469,104 @@ def create_pyvis_graph(G, highlight_nodes=None, highlight_edges=None, current_no
                 color = "#e67e22" # Orange
             else:
                 color = "#e74c3c" # Red
-            size = 20
+            size = 25
         else:
             color = "#3498db" # Blue
             size = 15
             
         label = f"{node} (h={st.session_state.heuristics.get(node, 0)})" if algo == "A*" else str(node)
-        net.add_node(node, label=label, color=color, title=f"Node: {node}", size=size)
+        # Bolder and larger node font
+        net.add_node(node, label=label, color=color, title=f"Node: {node}", size=size,
+                     font={"color": "white", "size": 20, "bold": True})
         
     for u, v, d in G.edges(data=True):
         weight = d.get('weight', 1)
         is_highlighted = (u, v) in highlight_edges or (v, u) in highlight_edges
         
-        color = "#e74c3c" if is_highlighted else "#555555"
-        width = 4 if is_highlighted else 1
+        color = "#e74c3c" if is_highlighted else "#888888"
+        width = 5 if is_highlighted else 2
         
-        net.add_edge(u, v, title=f"Weight: {weight}", label=str(weight), color=color, width=width)
+        # Edge label distinct styling
+        net.add_edge(u, v, title=f"Weight: {weight}", label=str(weight), color=color, width=width,
+                     font={"color": "white", "size": 16, "background": "rgba(231, 76, 60, 0.7)" if is_highlighted else "rgba(100, 100, 100, 0.7)", "strokeWidth": 0})
         
     net.set_options("""
     var options = {
       "physics": {
         "barnesHut": {
-          "gravitationalConstant": -3000,
-          "springLength": 200,
-          "springConstant": 0.04
+          "gravitationalConstant": -3500,
+          "springLength": 220,
+          "springConstant": 0.05
         }
       }
     }
     """)
     return net
 
-col1, col2 = st.columns([1, 3])
 
-if run_btn and st.session_state.G.number_of_nodes() > 0:
-    G = st.session_state.G
-    
-    if algo == "BFS":
-        st.session_state.history = bfs(G, start_node, target_node)
-    elif algo == "DFS":
-        st.session_state.history = dfs(G, start_node, target_node)
-    elif algo == "Dijkstra":
-        st.session_state.history = dijkstra(G, start_node, target_node)
-    elif algo == "A*":
-        st.session_state.history = astar(G, start_node, target_node, st.session_state.heuristics)
-    elif algo == "MST (Kruskal)":
-        st.session_state.history = mst_kruskal(G)
+# Handle auto play logic before rendering
+max_step = len(st.session_state.history) - 1 if st.session_state.history else -1
+
+def update_slider_manual():
+    st.session_state.step = st.session_state.timeline_slider
+    st.session_state.playing = False
+
+col1, col2 = st.columns([2, 3])
 
 with col1:
-    st.markdown("### Traversal Steps")
-    
-    if st.session_state.history:
-        max_step = len(st.session_state.history) - 1
-        if max_step >= 0:
-            step = st.slider("Timeline (Kéo thanh trượt)", 0, max_step, 0)
+    st.markdown("### Quản lý Mô phỏng")
+    if max_step >= 0:
+        c1, c2, c3 = st.columns([1,1,2])
+        with c1:
+            if st.button("▶️ Tự động chạy"):
+                st.session_state.playing = True
+                if st.session_state.step >= max_step:
+                    st.session_state.step = 0
+                st.rerun()
+        with c2:
+            if st.button("⏸️ Dừng"):
+                st.session_state.playing = False
+                st.rerun()
+        with c3:
+            st.session_state.speed = st.slider("Tốc độ (s/bước)", 0.3, 3.0, st.session_state.speed, 0.1)
+
+        # Handle playing loop
+        if st.session_state.playing:
+            if st.session_state.step < max_step:
+                time.sleep(st.session_state.speed)
+                st.session_state.step += 1
+                # Sync slider value
+                st.session_state.timeline_slider = st.session_state.step
+                st.rerun()
+            else:
+                st.session_state.playing = False
+
+        st.slider("Timeline (Bước xử lý)", 0, max_step, value=st.session_state.step, key="timeline_slider", on_change=update_slider_manual)
+        
+        state = st.session_state.history[st.session_state.step]
+        st.info(f"**Ghi chú bước {st.session_state.step}:**\n\n{state['log']}")
+        
+        st.markdown("#### Bảng Trạng Thái")
+        if "table" in state:
+            st.dataframe(state["table"], use_container_width=True, hide_index=True)
             
-            state = st.session_state.history[step]
-            st.info(state["log"])
-            
-            highlight_n = state["highlight_nodes"]
-            highlight_e = state["highlight_edges"]
-            curr_node = state["current_node"]
-        else:
-            st.warning("No path or steps generated.")
-            highlight_n = []
-            highlight_e = []
-            curr_node = None
+        highlight_n = state["highlight_nodes"]
+        highlight_e = state["highlight_edges"]
+        curr_node = state["current_node"]
     else:
-        st.info("Ready. Construct a graph and run an algorithm.")
+        st.info("Sẵn sàng! Hãy xây dựng đồ thị và bấm 'Tiến hành Mô Phỏng'.")
         highlight_n = []
         highlight_e = []
         curr_node = None
 
 with col2:
-    st.markdown("### Interactive Graph")
+    st.markdown("### Đồ thị trực quan")
     if st.session_state.G.number_of_nodes() > 0:
         net = create_pyvis_graph(st.session_state.G, highlight_nodes=highlight_n, highlight_edges=highlight_e, current_node=curr_node)
         with tempfile.NamedTemporaryFile(delete=False, suffix='.html') as tmp:
             net.save_graph(tmp.name)
             with open(tmp.name, 'r', encoding='utf-8') as f:
                 source_code = f.read()
-            components.html(source_code, height=650)
+            components.html(source_code, height=750)
     else:
-        st.info("Graph is empty. Please add nodes/edges using the sidebar or generate a random graph.")
+        st.warning("Đồ thị trống. Vui lòng thêm Node/Cạnh ở menu bên trái.")
